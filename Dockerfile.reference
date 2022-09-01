@@ -1,0 +1,38 @@
+FROM golang_1.17_alpine3.15_gcc AS build_stage
+#    └───────────┬────────────┘    └───┬─────┘
+#                │                 STAGE 1). "Big" base image used to build final executable
+#                │                           using go/GCC/build-utils ....
+# Common image to build golang services.
+# It is used for example by BesuDevNetwork/ibft_dockerized_network/docker-compose.yml
+# to build new images by just passing the build arg (vs ENV.VAR) 
+# 'BUILD_MODULE_ROOT_SRC_PATH'
+# It uses a multistage build to clear a lean built images (with no golang/C++ dependencies)
+# (built thanks to Dockerfile.go_builder)
+
+RUN apk add --no-cache gcc musl-dev
+
+ARG BUILD_MODULE_ROOT_SRC_PATH
+ENV MODULE_ROOT_SRC_PATH=${BUILD_MODULE_ROOT_SRC_PATH}
+RUN if [ -z "$MODULE_ROOT_SRC_PATH" ]; then echo "ABORTING NOW: MODULE_ROOT_SRC_PATH ENV.VAR NOT DEFINED"  exit 1; else echo "MODULE_ROOT_SRC_PATH: >$MODULE_ROOT_SRC_PATH<" ; fi
+
+ADD . /src
+RUN cd /src/${MODULE_ROOT_SRC_PATH}/ ; go build -o myFinalExecutable
+
+FROM  alpine:3.15
+#     └────┬────┘
+#     STAGE 2) Final image is just the executable built in STAGE 1)
+ARG BUILD_MODULE_ROOT_SRC_PATH
+ENV MODULE_ROOT_SRC_PATH=${BUILD_MODULE_ROOT_SRC_PATH}
+RUN if [ -z "$MODULE_ROOT_SRC_PATH" ]; then echo "ABORTING NOW: MODULE_ROOT_SRC_PATH ENV.VAR NOT DEFINED"  exit 1; else echo "MODULE_ROOT_SRC_PATH: >$MODULE_ROOT_SRC_PATH<" ; fi
+
+EXPOSE 12345
+
+VOLUME ["/var/readOnlyData", "/var/tmpData", "/var/readAndWriteDDBB", "/var/writeOnlyLogs"]
+
+# Copy server, scripts and webui to be exposed
+WORKDIR /app
+COPY --from=build_stage /src/${MODULE_ROOT_SRC_PATH}/myFinalExecutable /app/
+COPY --from=build_stage /src/${MODULE_ROOT_SRC_PATH}/myDefaultConfig   /app/
+#    └───────┬────────┘
+#    COPY FILES FROM STAGE 1
+ENTRYPOINT ["./myFinalExecutable","arg1","arg2"]
